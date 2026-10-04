@@ -3,6 +3,8 @@ name = "dirstat"
 version = "0.1.0"
 description = "Terminal disk usage browser: size on disk, apparent size, and file count, with HTML export."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "textual>=8.2.8",

@@ -7,10 +7,26 @@ with a treemap.
 
 ## Install
 
+Needs [uv](https://docs.astral.sh/uv/) and Python 3.12+ (uv can fetch Python for you).
+Works on Windows, Linux, and macOS.
+
 ```sh
-uv tool install .            # from this folder
-uv tool install -e .         # editable, picks up source changes
-uv tool upgrade dirstat      # after pulling changes (non-editable install)
+uv tool install git+https://github.com/jchimp/dirstat   # from GitHub
+uv tool upgrade dirstat                                 # get the latest version
+```
+
+From a local clone:
+
+```sh
+git clone https://github.com/jchimp/dirstat
+cd dirstat
+uv tool install .            # or -e . for an editable install
+```
+
+Run once without installing:
+
+```sh
+uvx --from git+https://github.com/jchimp/dirstat dirstat C:\
 ```
 
 ## Use
@@ -72,3 +88,7 @@ uv run pytest
 uv run ruff check . && uv run ruff format --check .
 uv run dirstat .
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
