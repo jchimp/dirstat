@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dirstat: __DIRSTAT_TITLE__</title>
+<!-- Self-contained on purpose: no CDN, no fonts, no network. It must open the same way offline
+     and years from now. -->
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --fg: #1d2330; --muted: #637083; --line: #d9dee6;
+  --accent: #2f6fdb; --bar: #2f6fdb; --bar-bg: #e6ebf3; --frame: rgba(20, 30, 50, .45);
+  --folded: #b9c0cb; --dir-leaf: #8d99ab; --err: #c0392b;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --panel: #1a1e26; --fg: #e3e7ee; --muted: #8e99aa; --line: #2c323d;
+    --accent: #6ea0ff; --bar: #6ea0ff; --bar-bg: #2a3140; --frame: rgba(255, 255, 255, .35);
+    --folded: #4a5160; --dir-leaf: #5d6879; --err: #ff7b6b;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+header { padding: 16px 20px 8px; }
+h1 { font-size: 18px; margin: 0 0 4px; word-break: break-all; }
+.meta { color: var(--muted); font-size: 13px; }
+.meta b { color: var(--fg); font-weight: 600; }
+.bar-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 8px 20px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button {
+  border: 0; background: var(--panel); color: var(--fg); padding: 6px 12px; cursor: pointer;
+  font: inherit; border-right: 1px solid var(--line);
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.crumbs { font-size: 13px; word-break: break-all; }
+.crumbs a { color: var(--accent); cursor: pointer; text-decoration: none; }
+.crumbs a:hover { text-decoration: underline; }
+.crumbs span.sep { color: var(--muted); margin: 0 4px; }
+#map {
+  position: relative; margin: 0 20px; height: 55vh; min-height: 280px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
+}
+.r {
+  position: absolute; overflow: hidden; font-size: 11px; line-height: 14px; padding: 1px 3px;
+  white-space: nowrap; text-overflow: ellipsis; color: #111;
+  border: 1px solid rgba(0, 0, 0, .25);
+}
+.r.frame {
+  background: transparent; border: 1px solid var(--frame); color: var(--fg); font-weight: 600;
+}
+.r.dir { cursor: zoom-in; }
+.r.folded { background: var(--folded); color: var(--fg); }
+.r.dirleaf { background: var(--dir-leaf); color: #fff; }
+.r:hover { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; }
+.wrap { padding: 12px 20px 40px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); font-size: 13px; }
+th, td { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; }
+th:first-child, td:first-child { text-align: left; }
+td { font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.name { max-width: 50vw; overflow: hidden; text-overflow: ellipsis; }
+.tog { display: inline-block; width: 16px; color: var(--muted); cursor: pointer; }
+.dirname { cursor: pointer; font-weight: 600; }
+.errname { color: var(--err); }
+.foldname { color: var(--muted); font-style: italic; }
+.focus { margin-left: 6px; color: var(--accent); cursor: pointer; font-size: 12px; }
+.share { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.share .b { width: 110px; height: 8px; background: var(--bar-bg); border-radius: 2px; }
+.share .b i { display: block; height: 100%; background: var(--bar); border-radius: 2px; }
+.more td { color: var(--muted); font-style: italic; text-align: left; }
+@media (max-width: 700px) {
+  header, .bar-row, .wrap { padding-left: 16px; padding-right: 16px; }
+  #map { margin: 0 16px; }
+  .share .b { width: 50px; }
+  .opt { display: none; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <div class="meta" id="meta"></div>
+</header>
+<div class="bar-row">
+  <div class="seg" role="group" aria-label="Measure by">
+    <button data-m="disk" aria-pressed="true">Size on disk</button>
+    <button data-m="app" aria-pressed="false">Apparent size</button>
+    <button data-m="files" aria-pressed="false">File count</button>
+  </div>
+  <div class="crumbs" id="crumbs"></div>
+</div>
+<div id="map" aria-label="Treemap"></div>
+<div class="wrap">
+  <table>
+    <thead><tr>
+      <th>Name</th><th>Share</th><th>Size on disk</th><th class="opt">Apparent</th>
+      <th>Files</th><th class="opt">Folders</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<script id="data" type="application/json">__DIRSTAT_DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const KIND_FILE = 0, KIND_DIR = 1, KIND_DIR_ERROR = 2, KIND_FOLDED = 3;
+const MAX_DEPTH = 10;      // treemap nesting levels drawn below the focused folder
+const ROW_LIMIT = 500;     // table rows per folder before "N more"
+
+let nextId = 0;
+function build(a, parent) {
+  const n = {
+    id: nextId++, name: a[0], disk: a[1], app: a[2], files: a[3], dirs: a[4], kind: a[5],
+    parent, children: null,
+  };
+  if (a[6]) n.children = a[6].map(c => build(c, n));
+  return n;
+}
+const ROOT = build(DATA.root, null);
+let metric = "disk";
+let focus = ROOT;
+const expanded = new Set([ROOT.id]);
+
+const isDir = n => n.kind === KIND_DIR || n.kind === KIND_DIR_ERROR;
+const val = n => n[metric];
+function fmtSize(b) {
+  if (b < 1024) return b + " B";
+  const units = ["KB", "MB", "GB", "TB", "PB"];
+  let s = b, i = -1;
+  do { s /= 1024; i++; } while (s >= 1024 && i < units.length - 1);
+  return s.toFixed(1) + " " + units[i];
+}
+const fmtCount = n => n.toLocaleString("en-US");
+const fmtVal = n => metric === "files" ? fmtCount(n.files) + " files" : fmtSize(val(n));
+const sortedKids = n => (n.children || []).slice().sort((a, b) => val(b) - val(a));
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// ---- header --------------------------------------------------------------
+function renderHeader() {
+  document.getElementById("title").textContent = ROOT.name;
+  const meta = document.getElementById("meta");
+  meta.textContent = "";
+  const parts = [
+    ["Size on disk", fmtSize(ROOT.disk)], ["Apparent", fmtSize(ROOT.app)],
+    ["Files", fmtCount(ROOT.files)], ["Folders", fmtCount(ROOT.dirs)],
+    ["Scanned in", DATA.elapsed + " s"], ["Unreadable", fmtCount(DATA.errors)],
+    ["Generated", DATA.generated],
+  ];
+  parts.forEach(([k, v], i) => {
+    if (i) meta.append(" · ");
+    meta.append(k + ": ");
+    meta.append(el("b", null, v));
+  });
+}
+
+function renderCrumbs() {
+  const c = document.getElementById("crumbs");
+  c.textContent = "";
+  const chain = [];
+  for (let n = focus; n; n = n.parent) chain.unshift(n);
+  chain.forEach((n, i) => {
+    if (i) c.append(el("span", "sep", "›"));
+    const a = el("a", null, n.name);
+    a.onclick = () => setFocus(n);
+    c.append(a);
+  });
+}
+
+// ---- treemap (squarified, Bruls et al.) ------------------------------------
+function worst(row, side) {
+  let sum = 0, max = 0, min = Infinity;
+  for (const r of row) { sum += r.a; max = Math.max(max, r.a); min = Math.min(min, r.a); }
+  const s2 = side * side, sum2 = sum * sum;
+  return Math.max(s2 * max / sum2, sum2 / (s2 * min));
+}
+
+function squarify(items, x, y, w, h) {
+  const total = items.reduce((t, it) => t + it.v, 0);
+  if (total <= 0 || w <= 0 || h <= 0) return [];
+  const scale = (w * h) / total;
+  let rest = items.map(it => ({ n: it.n, a: it.v * scale }));
+  const out = [];
+  while (rest.length) {
+    const side = Math.min(w, h);
+    let row = [rest[0]], i = 1, cur = worst(row, side);
+    while (i < rest.length) {
+      const cand = row.concat(rest[i]);
+      const wv = worst(cand, side);
+      if (wv > cur) break;
+      row = cand; cur = wv; i++;
+    }
+    rest = rest.slice(i);
+    const rowArea = row.reduce((t, r) => t + r.a, 0);
+    if (w >= h) {
+      const cw = rowArea / h;
+      let cy = y;
+      for (const r of row) { const rh = r.a / cw; out.push({ n: r.n, x, y: cy, w: cw, h: rh }); cy += rh; }
+      x += cw; w -= cw;
+    } else {
+      const rh = rowArea / w;
+      let cx = x;
+      for (const r of row) { const rw = r.a / rh; out.push({ n: r.n, x: cx, y, w: rw, h: rh }); cx += rw; }
+      y += rh; h -= rh;
+    }
+  }
+  return out;
+}
+
+// Color files by extension, like WinDirStat, so file types cluster visually.
+function extColor(name) {
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  let h = 0;
+  for (let i = 0; i < ext.length; i++) h = (h * 31 + ext.charCodeAt(i)) >>> 0;
+  return ext ? `hsl(${h % 360} 62% 68%)` : "hsl(0 0% 78%)";
+}
+
+function tip(n) {
+  const path = [];
+  for (let p = n; p; p = p.parent) path.unshift(p.name);
+  return path.join(" / ") + "\n" + fmtSize(n.disk) + " on disk · " + fmtSize(n.app) +
+    " apparent · " + fmtCount(n.files) + " files";
+}
+
+function drawLevel(map, node, x, y, w, h, depth) {
+  const items = sortedKids(node).filter(c => val(c) > 0).map(c => ({ n: c, v: val(c) }));
+  for (const r of squarify(items, x, y, w, h)) {
+    if (r.w < 2 || r.h < 2) continue;
+    const n = r.n;
+    const d = el("div", "r");
+    Object.assign(d.style, {
+      left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px",
+    });
+    d.title = tip(n);
+    const canNest = isDir(n) && n.children && depth < MAX_DEPTH && r.w > 8 && r.h > 8;
+    if (canNest) {
+      d.classList.add("frame", "dir");
+      map.append(d);
+      // Big folders get a name header; small ones just a thin border, so files stay visible.
+      if (r.w > 40 && r.h > 34) {
+        d.textContent = n.name;
+        drawLevel(map, n, r.x + 2, r.y + 16, r.w - 4, r.h - 18, depth + 1);
+      } else {
+        drawLevel(map, n, r.x + 1, r.y + 1, r.w - 2, r.h - 2, depth + 1);
+      }
+    } else {
+      if (isDir(n)) d.classList.add("dirleaf", "dir");
+      else if (n.kind === KIND_FOLDED) d.classList.add("folded");
+      else d.style.background = extColor(n.name);
+      if (r.w > 40 && r.h > 13) d.textContent = n.name;
+      map.append(d);
+    }
+    if (isDir(n)) d.onclick = e => { e.stopPropagation(); setFocus(n); };
+  }
+}
+
+function renderMap() {
+  const map = document.getElementById("map");
+  map.textContent = "";
+  drawLevel(map, focus, 0, 0, map.clientWidth, map.clientHeight, 1);
+}
+
+// ---- tree table ----------------------------------------------------------
+function addRows(tbody, node, depth) {
+  const kids = sortedKids(node);
+  const parentVal = val(node) || 1;
+  kids.slice(0, ROW_LIMIT).forEach(n => {
+    const tr = el("tr");
+    const name = el("td", "name");
+    name.style.paddingLeft = (8 + depth * 18) + "px";
+    const dir = isDir(n) && n.children && n.children.length;
+    const tog = el("span", "tog", dir ? (expanded.has(n.id) ? "▾" : "▸") : "");
+    name.append(tog);
+    let label;
+    if (n.kind === KIND_FOLDED) label = el("span", "foldname", n.name);
+    else if (isDir(n)) label = el("span", "dirname" + (n.kind === KIND_DIR_ERROR ? " errname" : ""), n.name + "/");
+    else label = el("span", null, n.name);
+    if (n.kind === KIND_DIR_ERROR) label.title = "Could not read all of this folder";
+    name.append(label);
+    if (dir) {
+      const toggle = () => { expanded.has(n.id) ? expanded.delete(n.id) : expanded.add(n.id); renderTable(); };
+      tog.onclick = toggle; label.onclick = toggle;
+      const f = el("span", "focus", "map");
+      f.title = "Show this folder in the treemap";
+      f.onclick = () => setFocus(n);
+      name.append(f);
+    }
+    name.title = tip(n);
+    tr.append(name);
+
+    const pct = val(n) / parentVal * 100;
+    const share = el("td");
+    const wrap = el("div", "share");
+    const bar = el("div", "b");
+    const fill = el("i");
+    fill.style.width = Math.min(100, pct) + "%";
+    bar.append(fill);
+    wrap.append(bar, el("span", null, pct.toFixed(1) + "%"));
+    share.append(wrap);
+    tr.append(share);
+    tr.append(el("td", null, fmtSize(n.disk)));
+    tr.append(el("td", "opt", fmtSize(n.app)));
+    tr.append(el("td", null, fmtCount(n.files)));
+    tr.append(el("td", "opt", isDir(n) || n.kind === KIND_FOLDED ? fmtCount(n.dirs) : ""));
+    tbody.append(tr);
+    if (dir && expanded.has(n.id)) addRows(tbody, n, depth + 1);
+  });
+  if (kids.length > ROW_LIMIT) {
+    const tr = el("tr", "more");
+    const td = el("td", null, `… ${fmtCount(kids.length - ROW_LIMIT)} more items`);
+    td.colSpan = 6;
+    td.style.paddingLeft = (8 + depth * 18) + "px";
+    tr.append(td);
+    tbody.append(tr);
+  }
+}
+
+function renderTable() {
+  const tbody = document.getElementById("rows");
+  tbody.textContent = "";
+  addRows(tbody, focus, 0);
+}
+
+// ---- wiring --------------------------------------------------------------
+function setFocus(n) {
+  focus = n;
+  expanded.add(n.id);
+  renderAll();
+}
+
+function renderAll() {
+  renderCrumbs();
+  renderMap();
+  renderTable();
+}
+
+document.querySelectorAll(".seg button").forEach(b => {
+  b.onclick = () => {
+    metric = b.dataset.m;
+    document.querySelectorAll(".seg button").forEach(x =>
+      x.setAttribute("aria-pressed", String(x === b)));
+    renderAll();
+  };
+});
+
+// ResizeObserver also catches layout changes after first paint, not only window resizes.
+let resizeTimer, lastSize = "";
+new ResizeObserver(() => {
+  const m = document.getElementById("map");
+  const size = m.clientWidth + "x" + m.clientHeight;
+  if (size === lastSize) return;
+  lastSize = size;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(renderMap, 100);
+}).observe(document.getElementById("map"));
+
+renderHeader();
+renderAll();
+</script>
+</body>
+</html>

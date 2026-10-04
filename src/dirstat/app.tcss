@@ -1,0 +1,37 @@
+#crumbs {
+    padding: 0 1;
+    background: $boost;
+    height: 1;
+}
+
+#totals {
+    padding: 0 1;
+    color: $text-muted;
+    height: 1;
+}
+
+#table {
+    height: 1fr;
+}
+
+ScanScreen {
+    align: center middle;
+}
+
+#scan-box {
+    width: 80%;
+    max-width: 100;
+    height: auto;
+    padding: 1 2;
+    border: round $accent;
+    background: $panel;
+}
+
+#scan-box LoadingIndicator {
+    height: 3;
+}
+
+#scan-path {
+    color: $text-muted;
+    height: 1;
+}
