@@ -24,6 +24,7 @@ from dirstat.scanner import Progress, ScanCancelled, ScanResult, scan
 # DataTable gets slow past a few thousand rows; giant folders show the top part only.
 ROW_LIMIT = 2000
 BAR_WIDTH = 20
+_PARTIAL = " ▏▎▍▌▋▊▉"
 
 HELP = """\
 Enter / →   open folder
@@ -35,18 +36,12 @@ r   rescan
 q   quit"""
 
 
-def bar(fraction: float, width: int = BAR_WIDTH) -> Text:
-    """Bar of background-colored spaces, one cell resolution.
-
-    Block glyphs (█▏▎…) can render wider than one cell in some fonts and leave
-    smears when DataTable repaints the cursor row; plain spaces cannot.
-    """
-    filled = round(max(0.0, min(1.0, fraction)) * width)
-    # Span style, not Text(style=...): a base style would color the empty part too.
-    text = Text()
-    text.append(" " * filled, style="on cyan")
-    text.append(" " * (width - filled))
-    return text
+def bar(fraction: float, width: int = BAR_WIDTH) -> str:
+    """Block-character bar with 1/8 cell resolution."""
+    eighths = round(max(0.0, min(1.0, fraction)) * width * 8)
+    full, part = divmod(eighths, 8)
+    text = "█" * full + (_PARTIAL[part] if part else "")
+    return text.ljust(width)
 
 
 def open_file(path: Path) -> None:
@@ -248,7 +243,7 @@ class DirStatApp(App[None]):
             cells = [
                 name,
                 Text(f"{frac * 100:.1f}", justify="right"),
-                bar(frac),
+                Text(bar(frac), style="cyan"),
                 Text(format_size(value(child, size_metric)), justify="right"),
                 Text(format_count(child.files), justify="right"),
                 dirs,
