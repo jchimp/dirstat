@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +24,6 @@ from dirstat.scanner import Progress, ScanCancelled, ScanResult, scan
 # DataTable gets slow past a few thousand rows; giant folders show the top part only.
 ROW_LIMIT = 2000
 BAR_WIDTH = 20
-_PARTIAL = " ▏▎▍▌▋▊▉"
 
 HELP = """\
 Enter / →   open folder
@@ -33,12 +35,38 @@ r   rescan
 q   quit"""
 
 
-def bar(fraction: float, width: int = BAR_WIDTH) -> str:
-    """Block-character bar with 1/8 cell resolution."""
-    eighths = round(max(0.0, min(1.0, fraction)) * width * 8)
-    full, part = divmod(eighths, 8)
-    text = "█" * full + (_PARTIAL[part] if part else "")
-    return text.ljust(width)
+def bar(fraction: float, width: int = BAR_WIDTH) -> Text:
+    """Bar of background-colored spaces, one cell resolution.
+
+    Block glyphs (█▏▎…) can render wider than one cell in some fonts and leave
+    smears when DataTable repaints the cursor row; plain spaces cannot.
+    """
+    filled = round(max(0.0, min(1.0, fraction)) * width)
+    # Span style, not Text(style=...): a base style would color the empty part too.
+    text = Text()
+    text.append(" " * filled, style="on cyan")
+    text.append(" " * (width - filled))
+    return text
+
+
+def open_file(path: Path) -> None:
+    """Open ``path`` with the OS default app for its file extension.
+
+    Raises:
+        OSError: No handler is registered, or the opener command is missing.
+    """
+    if sys.platform == "win32":
+        os.startfile(path)
+        return
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    # Silence the opener so its output does not draw over the TUI.
+    subprocess.Popen(
+        [opener, str(path)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
 
 class ScanScreen(ModalScreen[None]):
@@ -188,16 +216,21 @@ class DirStatApp(App[None]):
         table = self.query_one(DirTable)
         table.clear(columns=True)
         size_metric = Metric.APPARENT if self.metric is Metric.APPARENT else Metric.DISK
-        table.add_column("Name", key="name")
-        table.add_column(Text("%", justify="right"), key="pct", width=6)
-        table.add_column("", key="bar", width=BAR_WIDTH)
-        table.add_column(Text(size_metric.value, justify="right"), key="size")
-        table.add_column(Text("Files", justify="right"), key="files")
-        table.add_column(Text("Folders", justify="right"), key="dirs")
+        headers = {
+            "name": Text("Name"),
+            "pct": Text("%", justify="right"),
+            "bar": Text(""),
+            "size": Text(size_metric.value, justify="right"),
+            "files": Text("Files", justify="right"),
+            "dirs": Text("Folders", justify="right"),
+        }
+        blank = [Text("")] * (len(headers) - 1)
 
+        # Build every row before adding columns, so each column gets an explicit width.
+        rows: list[tuple[str, list[Text]]] = []
         offset = 0
         if node.parent is not None:
-            table.add_row(Text("..", style="bold"), "", "", "", "", "", key="..")
+            rows.append(("..", [Text("..", style="bold"), *blank]))
             offset = 1
 
         kids = sorted_children(node, self.metric)
@@ -212,26 +245,30 @@ class DirStatApp(App[None]):
             else:
                 name = Text(child.name)
                 dirs = Text("")
-            table.add_row(
+            cells = [
                 name,
                 Text(f"{frac * 100:.1f}", justify="right"),
-                Text(bar(frac), style="cyan"),
+                bar(frac),
                 Text(format_size(value(child, size_metric)), justify="right"),
                 Text(format_count(child.files), justify="right"),
                 dirs,
-                key=str(i),
-            )
+            ]
+            rows.append((str(i), cells))
         if len(kids) > ROW_LIMIT:
             more = len(kids) - ROW_LIMIT
-            table.add_row(
-                Text(f"<{format_count(more)} more items>", style="dim italic"),
-                "",
-                "",
-                "",
-                "",
-                "",
-                key="more",
-            )
+            label = Text(f"<{format_count(more)} more items>", style="dim italic")
+            rows.append(("more", [label, *blank]))
+
+        # Textual 8.2.8: auto-width columns are measured on idle, after cells may already be
+        # cached at the narrower width, and that cache is never cleared. Cursor moves then
+        # repaint rows with mixed widths and the columns smear. Fixed widths avoid it.
+        min_widths = {"pct": 6, "bar": BAR_WIDTH}
+        for col, (key, header) in enumerate(headers.items()):
+            widths = [min_widths.get(key, 0), header.cell_len]
+            widths += [cells[col].cell_len for _, cells in rows]
+            table.add_column(header, key=key, width=max(widths))
+        for key, cells in rows:
+            table.add_row(*cells, key=key)
 
         if select is not None and select in self._rows:
             table.move_cursor(row=self._rows.index(select) + offset)
@@ -322,6 +359,10 @@ class DirStatApp(App[None]):
             self.call_from_thread(self.notify, f"Export failed: {exc}", severity="error")
             return
         self.call_from_thread(self.notify, f"Saved {path}")
+        try:
+            open_file(path)
+        except OSError as exc:
+            self.call_from_thread(self.notify, f"Cannot open report: {exc}", severity="warning")
 
     def action_rescan(self) -> None:
         names: list[str] = []
