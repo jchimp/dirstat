@@ -15,7 +15,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, LoadingIndicator, Static
+from textual.widgets import DataTable, Footer, Header, LoadingIndicator, Static
 
 from dirstat.export_html import DEFAULT_MAX_NODES, export_html
 from dirstat.model import Metric, Node, format_count, format_size, sorted_children, value
@@ -129,6 +129,7 @@ class DirStatApp(App[None]):
         self._restore: list[str] = []
 
     def compose(self) -> ComposeResult:
+        yield Header(icon="")
         yield Static("", id="crumbs")
         yield Static("", id="totals")
         yield DirTable(id="table", cursor_type="row", zebra_stripes=True)
