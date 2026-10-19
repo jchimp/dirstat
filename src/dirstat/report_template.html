@@ -9,14 +9,18 @@
 <style>
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --fg: #1d2330; --muted: #637083; --line: #d9dee6;
-  --accent: #2f6fdb; --bar: #2f6fdb; --bar-bg: #e6ebf3; --frame: rgba(20, 30, 50, .45);
-  --folded: #b9c0cb; --dir-leaf: #8d99ab; --err: #c0392b;
+  --accent: #2f6fdb; --bar: #2f6fdb; --bar-bg: #e6ebf3;
+  --frame-bg: rgba(30, 45, 70, .06); --frame-head: rgba(30, 45, 70, .10);
+  --tile-fg: #16202e; --glow: rgba(47, 111, 219, .30);
+  --folded: #c3c9d2; --dir-leaf: #8d99ab; --err: #c0392b;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #12151b; --panel: #1a1e26; --fg: #e3e7ee; --muted: #8e99aa; --line: #2c323d;
-    --accent: #6ea0ff; --bar: #6ea0ff; --bar-bg: #2a3140; --frame: rgba(255, 255, 255, .35);
+    --accent: #6ea0ff; --bar: #6ea0ff; --bar-bg: #2a3140;
+    --frame-bg: rgba(255, 255, 255, .04); --frame-head: rgba(255, 255, 255, .08);
+    --tile-fg: #0d1117; --glow: rgba(110, 160, 255, .35);
     --folded: #4a5160; --dir-leaf: #5d6879; --err: #ff7b6b;
     color-scheme: dark;
   }
@@ -44,20 +48,33 @@ h1 { font-size: 18px; margin: 0 0 4px; word-break: break-all; }
 .crumbs span.sep { color: var(--muted); margin: 0 4px; }
 #map {
   position: relative; margin: 0 20px; height: 55vh; min-height: 280px;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
 }
 .r {
-  position: absolute; overflow: hidden; font-size: 11px; line-height: 14px; padding: 1px 3px;
-  white-space: nowrap; text-overflow: ellipsis; color: #111;
-  border: 1px solid rgba(0, 0, 0, .25);
+  position: absolute; overflow: hidden; font-size: 11px; line-height: 14px; padding: 1px 4px;
+  white-space: nowrap; text-overflow: ellipsis; color: var(--tile-fg); border-radius: 3px;
+  /* Cushion: light top-left, dark bottom-right, over the per-extension base color. */
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, .28), rgba(0, 0, 0, .14));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25);
+  transition: filter .12s;
 }
+.r:not(.frame):hover { filter: brightness(1.1) saturate(1.1); }
+/* Translucent frames stack, so deeper folders read slightly darker without extra colors. */
 .r.frame {
-  background: transparent; border: 1px solid var(--frame); color: var(--fg); font-weight: 600;
+  background: var(--frame-bg); box-shadow: none; color: var(--fg); font-weight: 600;
+  border-radius: 4px;
 }
+.r.frame.head { background-image: linear-gradient(var(--frame-head) 0 15px, transparent 15px); }
 .r.dir { cursor: zoom-in; }
-.r.folded { background: var(--folded); color: var(--fg); }
-.r.dirleaf { background: var(--dir-leaf); color: #fff; }
-.r:hover { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; }
+.r.folded { background-color: var(--folded); color: var(--fg); }
+.r.dirleaf { background-color: var(--dir-leaf); color: #fff; }
+/* One overlay follows the mouse. Its own element, because folder frames sit under their
+   children, so an outline on the frame would be hidden, and raising the frame would steal
+   the mouse from the blocks inside it. */
+#hl {
+  position: absolute; display: none; pointer-events: none; z-index: 2; border-radius: 4px;
+  border: 2px solid var(--accent); box-shadow: 0 0 0 3px var(--glow), 0 4px 14px var(--glow);
+}
 .wrap { padding: 12px 20px 40px; overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; background: var(--panel); font-size: 13px; }
 th, td { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: right; }
@@ -112,6 +129,7 @@ const DATA = JSON.parse(document.getElementById("data").textContent);
 const KIND_FILE = 0, KIND_DIR = 1, KIND_DIR_ERROR = 2, KIND_FOLDED = 3;
 const MAX_DEPTH = 10;      // treemap nesting levels drawn below the focused folder
 const ROW_LIMIT = 500;     // table rows per folder before "N more"
+const GAP = 1;             // px gutter on each side of a treemap tile
 
 let nextId = 0;
 function build(a, parent) {
@@ -218,13 +236,17 @@ function squarify(items, x, y, w, h) {
   return out;
 }
 
+const DARK = matchMedia("(prefers-color-scheme: dark)");
+
 // Color files by extension, like WinDirStat, so file types cluster visually.
 function extColor(name) {
   const dot = name.lastIndexOf(".");
   const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
   let h = 0;
   for (let i = 0; i < ext.length; i++) h = (h * 31 + ext.charCodeAt(i)) >>> 0;
-  return ext ? `hsl(${h % 360} 62% 68%)` : "hsl(0 0% 78%)";
+  // Dimmer in dark mode so tiles do not glare against the dark page.
+  const [s, l, grey] = DARK.matches ? [42, 58, 52] : [58, 70, 80];
+  return ext ? `hsl(${h % 360} ${s}% ${l}%)` : `hsl(0 0% ${grey}%)`;
 }
 
 function tip(n) {
@@ -236,7 +258,9 @@ function tip(n) {
 
 function drawLevel(map, node, x, y, w, h, depth) {
   const items = sortedKids(node).filter(c => val(c) > 0).map(c => ({ n: c, v: val(c) }));
-  for (const r of squarify(items, x, y, w, h)) {
+  for (const t of squarify(items, x, y, w, h)) {
+    // Inset each tile by GAP so the panel shows through as a thin gutter between tiles.
+    const r = { n: t.n, x: t.x + GAP, y: t.y + GAP, w: t.w - 2 * GAP, h: t.h - 2 * GAP };
     if (r.w < 2 || r.h < 2) continue;
     const n = r.n;
     const d = el("div", "r");
@@ -250,6 +274,7 @@ function drawLevel(map, node, x, y, w, h, depth) {
       map.append(d);
       // Big folders get a name header; small ones just a thin border, so files stay visible.
       if (r.w > 40 && r.h > 34) {
+        d.classList.add("head");
         d.textContent = n.name;
         drawLevel(map, n, r.x + 2, r.y + 16, r.w - 4, r.h - 18, depth + 1);
       } else {
@@ -258,7 +283,7 @@ function drawLevel(map, node, x, y, w, h, depth) {
     } else {
       if (isDir(n)) d.classList.add("dirleaf", "dir");
       else if (n.kind === KIND_FOLDED) d.classList.add("folded");
-      else d.style.background = extColor(n.name);
+      else d.style.backgroundColor = extColor(n.name);
       if (r.w > 40 && r.h > 13) d.textContent = n.name;
       map.append(d);
     }
@@ -270,6 +295,22 @@ function renderMap() {
   const map = document.getElementById("map");
   map.textContent = "";
   drawLevel(map, focus, 0, 0, map.clientWidth, map.clientHeight, 1);
+  const hl = el("div");
+  hl.id = "hl";
+  map.append(hl);
+}
+
+function highlight(e) {
+  const hl = document.getElementById("hl");
+  const r = e.target.closest(".r");
+  if (!hl) return;
+  if (!r) { hl.style.display = "none"; return; }
+  const pad = 1;  // sit just outside the tile so its own colors stay visible
+  Object.assign(hl.style, {
+    display: "block",
+    left: (r.offsetLeft - pad) + "px", top: (r.offsetTop - pad) + "px",
+    width: (r.offsetWidth + 2 * pad) + "px", height: (r.offsetHeight + 2 * pad) + "px",
+  });
 }
 
 // ---- tree table ----------------------------------------------------------
@@ -354,6 +395,15 @@ document.querySelectorAll(".seg button").forEach(b => {
     renderAll();
   };
 });
+
+const mapEl = document.getElementById("map");
+mapEl.addEventListener("mouseover", highlight);
+mapEl.addEventListener("mouseleave", () => {
+  const hl = document.getElementById("hl");
+  if (hl) hl.style.display = "none";
+});
+// Tile colors come from JS, so redraw when the OS theme flips while the report is open.
+DARK.addEventListener("change", renderMap);
 
 // ResizeObserver also catches layout changes after first paint, not only window resizes.
 let resizeTimer, lastSize = "";
